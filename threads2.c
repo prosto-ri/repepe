@@ -14,6 +14,7 @@ struct Params{
    pthread_cond_t condvar;
    pthread_mutex_t mutex;
    int numbers[10];
+   int count;
 };
 
 typedef struct node_t
@@ -28,6 +29,9 @@ typedef struct list_t
    TNode* tail;
 }  TList;
 
+TList* push(TList* list, int value);
+int pop(TList* list);
+
 int main(){
     struct Params params;  
     pthread_cond_init(&params.condvar, NULL); 
@@ -38,6 +42,7 @@ int main(){
 
     pthread_create(&read, NULL, reader, &params);
     pthread_create(&write, NULL, writer, &params);
+printf("create \n");
 
     pthread_join(read, NULL);
     pthread_join(write, NULL);
@@ -56,39 +61,48 @@ void* reader(void *p){
 	if(c != ' ' & c != '\n')
 	{
 		params->numbers[i] = (int)c;
+		(params->count)++;
 		i++;
 	}
-	if(c = '\n')
-	{
+	if(c == '\n')
+	{printf("line %d \n", k);
+	    printf("count = %d \n", params->count);
 	    pthread_t work;
 	    pthread_create(&work, NULL, worker, &params);
 	    i = 0;
+	    params->count = 0;
+	    k++;
 	}	
 	}
 }
 
 void* worker(void *p){
     struct Params* params = (struct Params*) p;
+    printf("worker started, count = %d \n", params->count);
     TList list;
     int sum = 0;
-    for (int i = 0; i < (sizeof(params->numbers)/sizeof(int)); i++)
+    for (int i = 0; i < (params->count); i++)
     {
+	printf("workerC %d \n", i+1);
 	sum = sum + params->numbers[i];
     }
     push(&list, sum);
-    k++;
     pthread_cond_signal(&params->condvar);
+    printf("worker finished \n");
 }
 
 void* writer(void *p){
+    printf("writer\n");
     struct Params* params = (struct Params*) p;
     TList list = {NULL, NULL};
     FILE *out = fopen("newFile2.txt", "w");
     int sumW = 0;
     for (int i = 0; i < k; i++)
     {
+printf("writerC %d \n", i+1);
 //	pthread_mutex_lock(&params->mutex);
         pthread_cond_wait(&params->condvar, &params->mutex);
+printf("writerCC %d \n", i+1);
         sumW = sumW + pop(&list);
 //	pthread_mutex_unlock(&params->mutex);
     }
@@ -97,7 +111,7 @@ void* writer(void *p){
 }
 
 TList* push(TList* list, int value)
-{
+{printf("push on \n");
    TNode* node = (TNode*) malloc(sizeof(TNode));
    node->value = value;
    node->next = NULL;
@@ -111,12 +125,12 @@ TList* push(TList* list, int value)
    {
       list->head = list->tail = node;
    }
- 
+ printf("push off \n");
    return list;
 }
 
 int pop(TList* list)
-{
+{printf("pop on \n");
    TNode* node = list->head;
    list->head = node->next;
    if (list->head == NULL)
@@ -125,6 +139,6 @@ int pop(TList* list)
    }
    int value = node->value;
    free(node);
- 
+ printf("pop off \n");
    return value;
 }
