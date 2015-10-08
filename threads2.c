@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <string.h>
 
 void* reader(void *p);
 void* worker(void *p);
@@ -13,8 +14,12 @@ int k = 1;
 struct Params{
    pthread_cond_t condvar;
    pthread_mutex_t mutex;
+};
+
+struct WorkerParams{
    int numbers[10];
    int count;
+   struct Params *params;
 };
 
 typedef struct node_t
@@ -32,8 +37,11 @@ typedef struct list_t
 TList* push(TList* list, int value);
 int pop(TList* list);
 
+TList list = {NULL, NULL};
+
 int main(){
     struct Params params;  
+
     pthread_cond_init(&params.condvar, NULL); 
     pthread_mutex_init(&params.mutex, NULL);
 
@@ -52,49 +60,56 @@ printf("create \n");
 }
 
 void* reader(void *p){
-    struct Params* params = (struct Params*) p;
     FILE *in = fopen("file", "r");
     char c;
     int i = 0;
+    int thisCount = 0;
+    int thisNumbers[10];
+    struct WorkerParams *paramsW;// = malloc(sizeof(int) * 11);
+//    paramsW->count = 0;
     while((c = fgetc(in)) != EOF)
     {
 	if(c != ' ' & c != '\n')
 	{
-		params->numbers[i] = (int)c;
-		(params->count)++;
+		thisNumbers[i] = (int)c;
+		thisCount++;
 		i++;
 	}
 	if(c == '\n')
 	{printf("line %d \n", k);
-	    printf("count = %d \n", params->count);
+	    paramsW = malloc(sizeof(int) * 11);
+	    paramsW->count = thisCount;
+	    memcpy(paramsW->numbers, thisNumbers, 10);
+	    printf("count = %d \n", paramsW->count);
 	    pthread_t work;
-	    pthread_create(&work, NULL, worker, &params);
-	    i = 0;
-	    params->count = 0;
+	    pthread_create(&work, NULL, worker, paramsW);
+//	    paramsW->count = 0;
+	    i = 0; 
+	    thisCount = 0;
 	    k++;
 	}	
 	}
 }
 
 void* worker(void *p){
-    struct Params* params = (struct Params*) p;
-    printf("worker started, count = %d \n", params->count);
-    TList list;
+    struct WorkerParams* paramsW = (struct WorkerParams*) p;
+
+    printf("worker started, count = %d \n", paramsW->count);
+
     int sum = 0;
-    for (int i = 0; i < (params->count); i++)
+    for (int i = 0; i < (paramsW->count); i++)
     {
 	printf("workerC %d \n", i+1);
-	sum = sum + params->numbers[i];
+	sum = sum + paramsW->numbers[i];
     }
     push(&list, sum);
-    pthread_cond_signal(&params->condvar);
+    pthread_cond_signal(&paramsW->params->condvar);
     printf("worker finished \n");
 }
 
 void* writer(void *p){
     printf("writer\n");
     struct Params* params = (struct Params*) p;
-    TList list = {NULL, NULL};
     FILE *out = fopen("newFile2.txt", "w");
     int sumW = 0;
     for (int i = 0; i < k; i++)
