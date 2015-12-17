@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <arpa/inet.h>
+#include <signal.h>
 
 #define MAXREQUEST 5 //max число запросов
 
@@ -17,6 +18,7 @@ static struct {
     char *err;
 } HTTP_StatusCodes[] = {
     { 200, "OK" },
+    { 400, "Bad Request" },
     { 403, "Forbidden" },
     { 404, "Not Found" },
     { 0, NULL }
@@ -36,12 +38,66 @@ static inline const char *getStatusDescrip(int status)
 
 
 int createSocket(int port) //создание сокета и привязка к порту
-int createStatus(int clientSock, char *root) //вернет код статуса запроса
+int createStatus(int clientSock, char *root, char *requestURI) //вернет код статуса запроса
 void sendStatus(int clientSock, int status) //отправка браузеру статуса
-void sendMessage(int sock, char *mess) //отправка сообщения
+size_t sendMessage(int sock, char *mess) //отправка сообщения
 void ext(char *message) //завершение программы
 
 int main(int argc, char *argv[]) //в аргументах порт и путь к файлу
+{   
+    if (signal(SIGPIPE, SIG_IGN) == SIG_ERR)
+        ext("signal() failed");
+
+    if (argc != 3) {
+        ext("port name or path to file missed");
+    }
+    
+    int port = atoi(argv[1]);
+    char *root = argv[2];
+    int sock = createSocket(port);
+    pid_t pid;
+    char line[1000];
+    char requestLine[1000];
+    int statusCode;
+    struct sockaddr_in clientAddr;
+
+    for (;;) {
+        fprintf(stderr,"waiting client connection\n");
+	/*----------------------------
+	  ожидание подключения клиента
+        -----------------------------*/
+	int clientLen = sizeof(clientAddr); 
+        int clientSock = accept(sock, (struct sockaddr *)&clientAddr, &clientLen);
+        if (clientSock < 0)
+            ext("accept() failed");
+        if((pid = fork())==-1){
+            ext("fork error");
+        }
+	else if(pid > 0){
+            close(clientSock);
+            continue;
+        }
+        close(clientSock);
+        FILE *clientFile = fdopen(clientSock, "r"); //преобразуем дескриптор сокета к файловому
+        if (clientFile == NULL)
+            ext("fdopen failed");
+
+        while (1) {
+            if (fgets(line, sizeof(line), clientFile) == NULL) {
+                statusCode = 400;
+	    sendStatus(clientSock, statusCode);
+            fclose(clientFile);
+	    ext("Bad Request");
+            }
+            if (strcmp("\r\n", line) == 0 || strcmp("\n", line) == 0) {
+                break;
+            }
+        }
+			
+        statusCode = createStatus(clientSock, root, requestURI);
+
+    return 0;
+}
 
 void ext(char *message)
 {
@@ -71,12 +127,12 @@ int createSocket(int port)
     return sock;
 }
 
-int createStatus(int clientSock, char *root)
+int createStatus(int clientSock, char *root, char *requestURI)
 {
     int statusCode;
     FILE *f = NULL;
     
-    char *file = (char*)malloc(strlen(root));
+    char *file = (char*)malloc(strlen(root) + strlen(requestURI));
     if (file == NULL)
         ext("malloc failed");
 
