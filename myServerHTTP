@@ -11,7 +11,7 @@
 #define MAXREQUEST 5 //max число запросов
 
 
-//------------------------------распознование ошибки
+//------------------------------распознование статуса
 static struct {
     int statusCode;
     char *err;
@@ -22,7 +22,7 @@ static struct {
     { 0, NULL }
 };
 
-static inline const char *getErrDescrip(int status)
+static inline const char *getStatusDescrip(int status)
 {
     int i = 0;
     while (HTTP_StatusCodes[i].statusCode > 0) {
@@ -30,7 +30,7 @@ static inline const char *getErrDescrip(int status)
             return HTTP_StatusCodes[i].err;
         i++;
     }
-    return "Unknown error";
+    return "Unknown status";
 }
 //----------------------------------------------------
 
@@ -38,7 +38,7 @@ static inline const char *getErrDescrip(int status)
 int createSocket(int port) //создание сокета и привязка к порту
 int createStatus(int clientSock, char *root) //вернет код статуса запроса
 void sendStatus(int clientSock, int status) //отправка браузеру статуса
-void sendMessage(int sock) //отправка сообщения
+void sendMessage(int sock, char *mess) //отправка сообщения
 void ext(char *message) //завершение программы
 
 int main(int argc, char *argv[]) //в аргументах порт и путь к файлу
@@ -116,3 +116,40 @@ int createStatus(int clientSock, char *root)
 
     return statusCode;
 }
+
+void sendStatus(int clientSock, int statusCode)
+{
+    char mess[1000];
+    const char *descrip = getStatusDescrip(statusCode);
+
+    //формирование статуса запроса
+    sprintf(mess, "HTTP/1.0 %d ", statusCode);
+    strcat(mess, descrip);
+    strcat(mess, "\r\n");
+    strcat(mess, "\r\n");
+
+    //перевод в html-формат
+    if (statusCode != 200) {
+        char body[1000];
+        sprintf(body, 
+                "<html><body>\n"
+                "<h1>%d %s</h1>\n"
+                "</body></html>\n",
+                statusCode, descrip);
+        strcat(mess, body);
+    }
+
+    sendMessage(clientSock, mess); //отправка браузеру
+}
+
+size_t sendMessage(int sock, char *mess)
+{
+    size_t len = strlen(mess);
+    size_t res = send(sock, mess, len, 0);
+    if (res != len) {
+        ext("sendMess failed");
+    }
+    else 
+        return res;
+}
+
