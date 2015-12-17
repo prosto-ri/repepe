@@ -137,6 +137,7 @@ int createStatus(int clientSock, char *root, char *requestURI)
         ext("malloc failed");
 
     strcpy(file, webRoot);
+    strcat(file, requestURI);
 
     //проверка чтения директория
     struct stat st;
