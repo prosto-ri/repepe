@@ -6,11 +6,40 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <arpa/inet.h>
+
+#define MAXREQUEST 5 //max число запросов
+
+
+//------------------------------распознование ошибки
+static struct {
+    int statusCode;
+    char *err;
+} HTTP_StatusCodes[] = {
+    { 200, "OK" },
+    { 403, "Forbidden" },
+    { 404, "Not Found" },
+    { 0, NULL }
+};
+
+static inline const char *getErrDescrip(int status)
+{
+    int i = 0;
+    while (HTTP_StatusCodes[i].statusCode > 0) {
+        if (HTTP_StatusCodes[i].statusCode == status)
+            return HTTP_StatusCodes[i].err;
+        i++;
+    }
+    return "Unknown error";
+}
+//----------------------------------------------------
+
 
 int createSocket(int port) //создание сокета и привязка к порту
-int createStatus(int sock, char root) //вернет код статуса запроса
-void sendStatus(int sock, int status) //отправка браузеру статуса запроса
-void send(int sock) //отправка сообщения
+int createStatus(int clientSock, char *root) //вернет код статуса запроса
+void sendStatus(int clientSock, int status) //отправка браузеру статуса
+void sendMessage(int sock) //отправка сообщения
+void ext(char *message) //завершение программы
 
 int main(int argc, char *argv[]) //в аргументах порт и путь к файлу
 
@@ -26,7 +55,7 @@ int createSocket(int port)
     struct sockaddr_in servAddr;
 
     if ((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
-        die("socket() failed");
+        ext("socket creating failed");
       
     memset(&servAddr, 0, sizeof(servAddr));
     servAddr.sin_family = AF_INET; //семейство адресов
@@ -36,10 +65,54 @@ int createSocket(int port)
     if (bind(sock, (struct sockaddr *)&servAddr, sizeof(servAddr)) < 0)
         ext("bind failed"); //попытка привязки
 
-    if (listen(sock, MAXPENDING) < 0)
+    if (listen(sock, MAXREQUEST) < 0)
         ext("listen failed"); //"прослушивание"
 
     return sock;
 }
 
+int createStatus(int clientSock, char *root)
+{
+    int statusCode;
+    FILE *f = NULL;
+    
+    char *file = (char*)malloc(strlen(root));
+    if (file == NULL)
+        ext("malloc failed");
 
+    strcpy(file, webRoot);
+
+    //проверка чтения директория
+    struct stat st;
+    if (stat(file, &st) == 0 && S_ISDIR(st.st_mode)) {
+        statusCode = 403;
+	return statusCode;
+    }
+
+    //проверка чтения файла
+    f = fopen(file, "rb");
+    if (f == NULL) {
+        statusCode = 404; 
+        sendStatus(clientSock, statusCode);
+        return statusCode;
+    }
+
+    statusCode = 200; 
+    sendStatus(clientSock, statusCode);
+
+    //попытка чтения
+    size_t s;
+    char buf[2048];
+    while ((s = fread(buf, 1, sizeof(buf), f)) > 0) {
+        if (send(clientSock, buf, s, 0) != s) {
+            ext("send() failed");
+        }
+    }
+    if (ferror(f))
+        ext("fread() failed");
+
+    free(file);
+    fclose(f);
+
+    return statusCode;
+}
