@@ -7,11 +7,39 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-void createSocket(int port) //создание сокета и привязка к порту
-int createStatus(int socket, char root) //вернет код статуса запроса
-void sendStatus(int socket, int status) //отправка браузеру статуса запроса
-void send(int socket) //отправка сообщения
+int createSocket(int port) //создание сокета и привязка к порту
+int createStatus(int sock, char root) //вернет код статуса запроса
+void sendStatus(int sock, int status) //отправка браузеру статуса запроса
+void send(int sock) //отправка сообщения
 
 int main(int argc, char *argv[]) //в аргументах порт и путь к файлу
+
+void ext(char *message)
+{
+    perror(message);
+    exit(1); 
+}
+
+int createSocket(int port)
+{
+    int sock;
+    struct sockaddr_in servAddr;
+
+    if ((sock = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
+        die("socket() failed");
+      
+    memset(&servAddr, 0, sizeof(servAddr));
+    servAddr.sin_family = AF_INET; //семейство адресов
+    servAddr.sin_addr.s_addr = htonl(INADDR_ANY); //сокет будет связан со всеми локальными интерефейсами
+    servAddr.sin_port = htons(port):
+
+    if (bind(sock, (struct sockaddr *)&servAddr, sizeof(servAddr)) < 0)
+        ext("bind failed"); //попытка привязки
+
+    if (listen(sock, MAXPENDING) < 0)
+        ext("listen failed"); //"прослушивание"
+
+    return sock;
+}
 
 
