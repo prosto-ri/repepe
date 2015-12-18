@@ -8,6 +8,7 @@
 #include <sys/wait.h>
 #include <arpa/inet.h>
 #include <signal.h>
+#include <sys/stat.h>
 
 #define MAXREQUEST 5 //max число запросов
 
@@ -37,11 +38,11 @@ static inline const char *getStatusDescrip(int status)
 //----------------------------------------------------
 
 
-int createSocket(int port) //создание сокета и привязка к порту
-int createStatus(int clientSock, char *root, char *requestURI) //вернет код статуса запроса
-void sendStatus(int clientSock, int status) //отправка браузеру статуса
-size_t sendMessage(int sock, char *mess) //отправка сообщения
-void ext(char *message) //завершение программы
+int createSocket(int port); //создание сокета и привязка к порту
+int createStatus(int clientSock, char *root, char *requestURI); //вернет код статуса запроса
+void sendStatus(int clientSock, int status); //отправка браузеру статуса
+size_t sendMessage(int sock, char *mess); //отправка сообщения
+void ext(char *message); //завершение программы
 
 int main(int argc, char *argv[]) //в аргументах порт и путь к файлу
 {   
@@ -77,10 +78,27 @@ int main(int argc, char *argv[]) //в аргументах порт и путь 
             close(clientSock);
             continue;
         }
-        close(clientSock);
+        close(sock);
         FILE *clientFile = fdopen(clientSock, "r"); //преобразуем дескриптор сокета к файловому
         if (clientFile == NULL)
             ext("fdopen failed");
+
+	//парс запроса
+	char *method      = "";
+        char *requestURI  = "";
+        char *httpVersion = "";
+        if (fgets(requestLine, sizeof(requestLine), clientFile) == NULL) {
+            statusCode = 400;
+            sendStatus(clientSock, statusCode);
+            fclose(clientFile);
+	    ext("Bad Request");
+        }
+	
+        char *seps = "\t\r\n"; 
+        method = strtok(requestLine, seps);
+        requestURI = strtok(NULL, seps);
+        httpVersion = strtok(NULL, seps);
+        char *extraThingsOnRequestLine = strtok(NULL, seps);
 
         while (1) {
             if (fgets(line, sizeof(line), clientFile) == NULL) {
@@ -89,13 +107,13 @@ int main(int argc, char *argv[]) //в аргументах порт и путь 
             fclose(clientFile);
 	    ext("Bad Request");
             }
-            if (strcmp("\r\n", line) == 0 || strcmp("\n", line) == 0) {
+            if (strcmp("\r\n", line) == 0 || strcmp("\n", line) == 0){
                 break;
             }
         }
 			
         statusCode = createStatus(clientSock, root, requestURI);
-
+    }
     return 0;
 }
 
@@ -116,7 +134,7 @@ int createSocket(int port)
     memset(&servAddr, 0, sizeof(servAddr));
     servAddr.sin_family = AF_INET; //семейство адресов
     servAddr.sin_addr.s_addr = htonl(INADDR_ANY); //сокет будет связан со всеми локальными интерефейсами
-    servAddr.sin_port = htons(port):
+    servAddr.sin_port = htons(port);
 
     if (bind(sock, (struct sockaddr *)&servAddr, sizeof(servAddr)) < 0)
         ext("bind failed"); //попытка привязки
@@ -136,7 +154,7 @@ int createStatus(int clientSock, char *root, char *requestURI)
     if (file == NULL)
         ext("malloc failed");
 
-    strcpy(file, webRoot);
+    strcpy(file, root);
     strcat(file, requestURI);
 
     //проверка чтения директория
