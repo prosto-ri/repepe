@@ -61,29 +61,45 @@ int main(int argc, char *argv[])
 
 static int _getattr(const char *path, struct stat * stbuf) {
     printf("getattr: %s\n", path);
-    /*
-      Get file info
-      ...
-    */
+    int res;
 
-    memset(stbuf, 0, sizeof (struct stat));
-    stbuf->st_mode = /*mode*/
-    stbuf->st_nlink = /*count of links*/
-    stbuf->st_size = /*file size*/
+	res = lstat(path, stbuf);
+	if (res == -1)
+		return -errno;
 
-    return 0;
+	printf("getattr: %s\n", path);
+
+	memset(stbuf, 0, sizeof(struct stat));
+	if (strcmp(path, "/") == 0) {
+		stbuf->st_mode = S_IFDIR | 0755;
+		stbuf->st_nlink = 2;
+	} else {
+		stbuf->st_mode = S_IFREG | 0444;
+		stbuf->st_nlink = 1;
+		stbuf->st_size = 0;
+	}
+
+	return 0;
 }
 
 static int _readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info * fi) {
-    /*
-      Get list of files in directory
-      ...
-    */
+	
+    (void) offset;
+	(void) fi;
 
-    // foreach file
-    filler(buf, fileName, NULL, 0); // add filename in directory *path* to buffer
+	int cluster;
+	
+	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
+	{
+		int index = getClusterPointer(cluster);
+		if (index == END_CLUSTER)
+		{
+			fat_header header = getClusterHeader(cluster);
+			filler(buf, header.filename, NULL, 0);
+		}
+	}
 
-    return 0;
+	return 0;
 }
 
 static int _open(const char *path, struct fuse_file_info * fi) {
