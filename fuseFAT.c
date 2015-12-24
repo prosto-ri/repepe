@@ -22,6 +22,7 @@ FILE* fp;
 typedef struct fat_header //структура метаданных
 {
 	char filename[FILENAME_LENGTH];
+	int firstCluster;
 	int size;
 
 } fat_header;
@@ -83,7 +84,7 @@ static int _getattr(const char *path, struct stat * stbuf) {
 }
 
 static int _readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info * fi) {
-	
+
     (void) offset;
 	(void) fi;
 
@@ -105,20 +106,26 @@ static int _readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t o
 static int _open(const char *path, struct fuse_file_info * fi) {
     printf("open: %s\n", path);
 
-    /*
-      Get list of files in directory
-      ...
-    */
-    
-    fileInfo->fileInode = // set inode;
-    fileInfo->fullfileName = // specify file name;
-    fileInfo->isLocked = false; // set is file locked
+    int cluster;
+    for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
+    {
+    	int clusterPointer = getClusterPointer(cluster);
+    	if (clusterPointer == END_CLUSTER)
+    	{
+      		fat_header header = getClusterHeader(cluster);
+      		if (strcmp(path, header.filename) == 0)
+      		{ 
+        		fileInfo->fileInode = header.firstCluster;
+          		fileInfo->fullfileName = header.filename;
+          		fileInfo->isLocked = false; // set is file locked
 
-    
-
-    printf("open: Opened successfully\n");
-
-    return 0;
+                printf("open: Opened successfully\n");
+        		return 0;
+        	}
+        } 
+    }
+  }
+  return -ENOENT; //если файла с данным именем не сущ-ет
 }
 
 static int _read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info * fi) {
@@ -126,9 +133,10 @@ static int _read(const char *path, char *buf, size_t size, off_t offset, struct 
     /*
       Read file
       ...
-      byte *fileContent = readFile(fileInode);
-      memcpy(buf, fileContent, size);
-    */  
+    */
+    byte *fileContent = readFile(fileInode);
+    memcpy(buf, fileContent, size);
+      
     return size;
 }
 
@@ -159,4 +167,23 @@ static int _write(const char *path, const char *content, size_t size, off_t offs
       ...
     */
     return 0; // Num of bytes written
+}
+
+int getClusterPointer(int index)
+{
+	fseek(fp, index, SEEK_SET);
+
+	int readInfo;
+	fread(&readInfo, sizeof(int), 1, fp);
+	return readInfo;
+}
+
+fat_header getClusterHeader(int cluster)
+{
+	fat_header header;
+
+	fseek(fp, MAX_POINTER * POINTER_SIZE + cluster * CLUSTER_SIZE, SEEK_SET);
+	fread(&header, sizeof(fat_header), 1, fp);
+	
+	return header;
 }
