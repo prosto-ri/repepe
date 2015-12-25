@@ -7,9 +7,12 @@
 
 #define FILENAME_LENGTH  10
 
+#define MAX(x, y) (((x) > (y)) ? (x) : (y))
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+
 int CLUSTER_SIZE = 4096; //размер кластера в байтах
 int MAX_POINTER = 1048576; //кол-во кластеров
-int POINTER_SIZE = 4; //размер указателя
+int POINTER_SIZE = sizeof(int); //размер указателя
 
 int FREE_CLUSTER = 0; //значение свободного кластера
 int END_CLUSTER = 1048577;
@@ -27,7 +30,7 @@ typedef struct fat_header //структура метаданных
 static int _readdir();//чтение директории
 static int _open(const char *name); //открыть файл
 static int _read(const char *name, char *buf, size_t size, off_t offset); //чтение файла
-static void _truncate(const char *name); //удаление файла
+static void _truncate(const char *name, int size); //удаление файла
 static int _create(const char *name); //создание пустого файла
 static int _write(const char * name, const char * buf, size_t size, off_t offset); //запись в файл
 
@@ -266,27 +269,70 @@ static int _write(const char * name, const char * buf, size_t size, off_t offset
 	return size;
 }
 
-static int _truncate(const char *name) {
+static int _truncate(const char *name, int size) {
     int cluster;
+	int clusterPointer;
+	int startCluster = -1;
+
+	fat_header header;
 	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
 	{
-		int clusterPointer = getClusterPointer(cluster);
-
+		clusterPointer = getClusterPointer(cluster);
 		if (clusterPointer == FREE_CLUSTER)
 			continue;
-
-		fat_header header = getClusterHeader(cluster);
+	
+		header = getClusterHeader(cluster);
 		if (strcmp(name, header.filename) == 0)
 		{
-			setClusterPointer(cluster, FREE_CLUSTER);
-			if (startCluster == END_CLUSTER)
-			{
-				printf("truncate: Truncated successfully\n");
-   				return 0;
-			}
+			startCluster = cluster;
+			break;
 		}
 	}
-	return -ENOENT;
+
+	if (startCluster == -1)
+		return 0;
+
+	if (offset > header.size)
+		return 0;
+
+	header.size = size;
+
+  	int writtenBytes = 0;
+  	while (writtenBytes < size)
+  	{
+  		int readBytes = CLUSTER_SIZE - sizeof(fat_header);
+
+  		int indexOfData = MAX_POINTER * POINTER_SIZE + startCluster * CLUSTER_SIZE;
+		fseek(fp, indexOfData, SEEK_SET);
+		fwrite(&header, sizeof(fat_header), 1, fp);
+
+		writtenBytes += readBytes;
+		if (writtenBytes < size)
+		{
+
+			if (startCluster == END_CLUSTER)
+			{
+				int freeCluster2 = getFreeCluster();
+				setClusterPointer(startCluster, freeCluster2);
+				startCluster = freeCluster2;
+			}
+			else
+				startCluster = getClusterPointer(startCluster);		
+		}
+  	}  	
+
+	while(1)
+	{
+		fseek(fp, MAX_POINTER * POINTER_SIZE + startCluster * CLUSTER_SIZE, SEEK_SET);
+		fwrite(&header, sizeof(fat_header), 1, fp);
+		if (getClusterPointer(startCluster) == END_CLUSTER)
+			break;
+
+		startCluster = getClusterPointer(startCluster);
+	}
+
+ 	printf("truncate: Truncated successfully\n");
+	return 0;
 }
 
 int getClusterPointer(int index)

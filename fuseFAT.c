@@ -10,9 +10,12 @@
 
 #define FILENAME_LENGTH  10
 
+#define MAX(x, y) (((x) > (y)) ? (x) : (y))
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+
 int CLUSTER_SIZE = 4096; //размер кластера в байтах
 int MAX_POINTER = 1048576; //кол-во кластеров
-int POINTER_SIZE = 4; //размер указателя
+int POINTER_SIZE = sizeof(int); //размер указателя
 
 int FREE_CLUSTER = 0; //значение свободного кластера
 int END_CLUSTER = 1048577;
@@ -58,6 +61,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	fp = fopen(argv[2], "r+");
 	return fuse_main(argc, argv, &oper, NULL);//запуск фс
 }
 
@@ -96,6 +100,9 @@ static int _readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t o
     (void) offset;
 	(void) fi;
 
+	filler(buf, ".", NULL, 0);
+	filler(buf, "..", NULL, 0);
+
 	int cluster;
 	
 	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
@@ -104,7 +111,7 @@ static int _readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t o
 		if (index == END_CLUSTER)
 		{
 			fat_header header = getClusterHeader(cluster);
-			filler(buf, header.filename, NULL, 0);
+			filler(buf, header.filename + 1, NULL, 0);
 		}
 	}
 
@@ -123,15 +130,14 @@ static int _open(const char *path, struct fuse_file_info * fi) {
 			continue;
 
 		fat_header header = getClusterHeader(cluster);
-      		if (strcmp(path, header.filename) == 0)
-      		{ 
-        		fileInfo->fileInode = header.firstCluster;
-          		fileInfo->fullfileName = header.filename;
-          		fileInfo->isLocked = false; // set is file locked
+      	if (strcmp(path, header.filename) == 0)
+      	{ 
+       		fileInfo->fileInode = header.firstCluster;
+          	fileInfo->fullfileName = header.filename;
+          	fileInfo->isLocked = false; // set is file locked
 
-                printf("open: Opened successfully\n");
-        		return 0;
-        	}
+            printf("open: Opened successfully\n");
+        	return 0;
         } 
     }
   
@@ -180,7 +186,7 @@ static int _read(const char *path, char *buf, size_t size, off_t offset, struct 
 	while(readData < size)
 	{		
 		int readBytes = MIN(size - readData, CLUSTER_SIZE - sizeof(fat_header) - clusterOffset);
-		/
+		
 		if (readData + readBytes > header.size)
 			readBytes = header.size - readData;
 
@@ -207,25 +213,68 @@ static int _read(const char *path, char *buf, size_t size, off_t offset, struct 
 static int _truncate(const char *path, off_t size) {
 	
     int cluster;
+	int clusterPointer;
+	int startCluster = -1;
+
+	fat_header header;
 	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
 	{
-		int clusterPointer = getClusterPointer(cluster);
-
+		clusterPointer = getClusterPointer(cluster);
 		if (clusterPointer == FREE_CLUSTER)
 			continue;
-
-		fat_header header = getClusterHeader(cluster);
+	
+		header = getClusterHeader(cluster);
 		if (strcmp(path, header.filename) == 0)
 		{
-			setClusterPointer(cluster, FREE_CLUSTER);
-			if (startCluster == END_CLUSTER)
-			{
-				printf("truncate: Truncated successfully\n");
-   				return 0;
-			}
+			startCluster = cluster;
+			break;
 		}
 	}
-	return -ENOENT;
+
+	if (startCluster == -1)
+		return 0;
+
+	if (offset > header.size)
+		return 0;
+
+	header.size = size;
+
+  	int writtenBytes = 0;
+  	while (writtenBytes < size)
+  	{
+  		int readBytes = CLUSTER_SIZE - sizeof(fat_header);
+
+  		int indexOfData = MAX_POINTER * POINTER_SIZE + startCluster * CLUSTER_SIZE;
+		fseek(fp, indexOfData, SEEK_SET);
+		fwrite(&header, sizeof(fat_header), 1, fp);
+
+		writtenBytes += readBytes;
+		if (writtenBytes < size)
+		{
+
+			if (startCluster == END_CLUSTER)
+			{
+				int freeCluster2 = getFreeCluster();
+				setClusterPointer(startCluster, freeCluster2);
+				startCluster = freeCluster2;
+			}
+			else
+				startCluster = getClusterPointer(startCluster);		
+		}
+  	}  	
+
+	while(1)
+	{
+		fseek(fp, MAX_POINTER * POINTER_SIZE + startCluster * CLUSTER_SIZE, SEEK_SET);
+		fwrite(&header, sizeof(fat_header), 1, fp);
+		if (getClusterPointer(startCluster) == END_CLUSTER)
+			break;
+
+		startCluster = getClusterPointer(startCluster);
+	}
+
+ 	printf("truncate: Truncated successfully\n");
+	return 0;
 }
 
 static int _create(const char *path, mode_t mode, struct fuse_file_info *fi) {
@@ -361,7 +410,7 @@ int getClusterPointer(int index)
 void setClusterPointer(int index, int data)
 {
 	fseek(fp, index, SEEK_SET);
-	fwrite(&data, sizeof(int32_t), 1, fp);
+	fwrite(&data, sizeof(int), 1, fp);
 }
 
 fat_header getClusterHeader(int cluster)
