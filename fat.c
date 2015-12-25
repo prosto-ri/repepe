@@ -33,6 +33,7 @@ static int _write(const char *name); //запись в файл
 
 fat_header getClusterHeader(int cluster);//возвращает метаданные файла из кластера с индексом cluster
 int getClusterPointer(int index);//возвращает данные из указателя с индексом index
+void setClusterPointer(int index, int data);//установка нового значения указателя с индексом index
 int getFreeCluster();//возвращает индекс первого пустого указателя или -1
 
 int main(int argc, char *argv[])
@@ -178,6 +179,29 @@ static int _read(const char *name, char *buf, size_t size, off_t offset)
 	return readData;
 }
 
+static int _truncate(const char *name) {
+    int cluster;
+	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
+	{
+		int clusterPointer = getClusterPointer(cluster);
+
+		if (clusterPointer == FREE_CLUSTER)
+			continue;
+
+		fat_header header = getClusterHeader(cluster);
+		if (strcmp(name, header.filename) == 0)
+		{
+			setClusterPointer(cluster, FREE_CLUSTER);
+			if (startCluster == END_CLUSTER)
+			{
+				printf("truncate: Truncated successfully\n");
+   				return 0;
+			}
+		}
+	}
+	return -ENOENT;
+}
+
 int getClusterPointer(int index)
 {
 	fseek(fp, index, SEEK_SET);
@@ -185,6 +209,12 @@ int getClusterPointer(int index)
 	int readInfo;
 	fread(&readInfo, sizeof(int), 1, fp);
 	return readInfo;
+}
+
+void setClusterPointer(int index, int data)
+{
+	fseek(fp, index, SEEK_SET);
+	fwrite(&data, sizeof(int32_t), 1, fp);
 }
 
 fat_header getClusterHeader(int cluster)

@@ -47,6 +47,7 @@ static struct fuse_operations oper = {
 
 fat_header getClusterHeader(int cluster);//возвращает метаданные файла из кластера с индексом cluster
 int getClusterPointer(int index);//возвращает данные из указателя с индексом index
+void setClusterPointer(int index, int data);//установка нового значения указателя с индексом index
 int getFreeCluster();//возвращает индекс первого пустого указателя или -1
 
 int main(int argc, char *argv[])
@@ -139,7 +140,7 @@ static int _open(const char *path, struct fuse_file_info * fi) {
 
 static int _read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info * fi) {
     printf("read: %s\n", path);
-    
+
     int cluster;
 	int clusterPointer;
 	int startCluster = -1;
@@ -204,13 +205,27 @@ static int _read(const char *path, char *buf, size_t size, off_t offset, struct 
 }
 
 static int _truncate(const char *path, off_t size) {
-    /*
-      truncate file
-      ...
-    */
+	
+    int cluster;
+	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
+	{
+		int clusterPointer = getClusterPointer(cluster);
 
-    printf("truncate: Truncated successfully\n");
-    return 0;
+		if (clusterPointer == FREE_CLUSTER)
+			continue;
+
+		fat_header header = getClusterHeader(cluster);
+		if (strcmp(path, header.filename) == 0)
+		{
+			setClusterPointer(cluster, FREE_CLUSTER);
+			if (startCluster == END_CLUSTER)
+			{
+				printf("truncate: Truncated successfully\n");
+   				return 0;
+			}
+		}
+	}
+	return -ENOENT;
 }
 
 static int _create(const char *path, mode_t mode, struct fuse_file_info *fi) {
@@ -263,6 +278,12 @@ int getClusterPointer(int index)
 	int readInfo;
 	fread(&readInfo, sizeof(int), 1, fp);
 	return readInfo;
+}
+
+void setClusterPointer(int index, int data)
+{
+	fseek(fp, index, SEEK_SET);
+	fwrite(&data, sizeof(int32_t), 1, fp);
 }
 
 fat_header getClusterHeader(int cluster)
