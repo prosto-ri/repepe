@@ -48,6 +48,7 @@ static int _readdir()
 {
 	int cluster;
 	
+	//вывод списка файлов в директории
 	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
 	{
 		int index = getClusterPointer(cluster);
@@ -61,9 +62,44 @@ static int _readdir()
 	return 0;
 }
 
+static int _create(const char *name)
+{
+	int cluster;
+
+	//проверяем наличие такого же имени
+	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
+	{
+		int clusterPointer = getClusterPointer(cluster);
+		if (clusterPointer == END_CLUSTER)
+		{			
+			fat_header header = getClusterHeader(cluster);
+			if (strcmp(name, header.filename) == 0)//файл с таким именем сущ-ет
+				return -1;
+		}
+	}
+
+	int freeCluster = getFreeCluster();//получение индекса свободного кластера
+	if (freeCluster == -1)//если нет свободных
+		return -1;
+
+	fat_header header;
+
+	strcpy(header.filename, name);
+	header.size = 0;
+	header.firstCluster = freeCluster;
+
+	fseek(fp, freeCluster, SEEK_SET);
+	fwrite(&END_CLUSTER, sizeof(int), 1, fp);//устанавливаем конец файла
+
+	fseek(fp, MAX_POINTER * POINTER_SIZE + freeCluster * CLUSTER_SIZE, SEEK_SET);
+	fwrite(&header, sizeof(fat_header), 1, fp);
+
+	return 0;
+}
+
 static int _open(const char *name)
 {
-	int32_t cluster;
+	int cluster;
 	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
 	{
 		int clusterPointer = getClusterPointer(cluster);
@@ -94,4 +130,20 @@ fat_header getClusterHeader(int cluster)
 	fread(&header, sizeof(fat_header), 1, fp);
 	
 	return header;
+}
+
+int getFreeCluster()
+{
+	int cluster;
+	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
+	{
+		fseek(fp, cluster, SEEK_SET);
+
+		int readInfo;
+		fread(&readInfo, sizeof(int), 1, fp);
+
+		if (readInfo == FREE_CLUSTER)
+			return cluster;
+	}
+	return -1;
 }
