@@ -1,3 +1,6 @@
+//for compil and run:
+//dd if=/dev/zero of=fat.file bs=1G count=1 && gcc -Wall fat.c -o fat && ./fat fat.file
+
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -30,7 +33,7 @@ typedef struct fat_header //структура метаданных
 static int _readdir();//чтение директории
 static int _open(const char *name); //открыть файл
 static int _read(const char *name, char *buf, size_t size, off_t offset); //чтение файла
-static void _truncate(const char *name, int size); //удаление файла
+static int _truncate(const char *name, int size); //удаление файла
 static int _create(const char *name); //создание пустого файла
 static int _write(const char * name, const char * buf, size_t size, off_t offset); //запись в файл
 
@@ -41,11 +44,14 @@ int getFreeCluster();//возвращает индекс первого пуст
 
 int main(int argc, char *argv[])
 {
-	if (argc != 3)
+	if (argc != 2)
 	{
-		printf("Usage: %s [mount-point] [filesystem-file]", argv[0]);
+		printf("Usage: %s [filesystem-file]", argv[0]);
 		return 1;
 	}
+
+	fp = fopen(argv[1], "r+");
+	return 0;
 }
 
 static int _readdir()
@@ -103,6 +109,7 @@ static int _create(const char *name)
 
 static int _open(const char *name)
 {
+	int cluster;
 	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
 	{
 		int clusterPointer = getClusterPointer(cluster);
@@ -158,7 +165,7 @@ static int _read(const char *name, char *buf, size_t size, off_t offset)
 	while(readData < size)
 	{		
 		int readBytes = MIN(size - readData, CLUSTER_SIZE - sizeof(fat_header) - clusterOffset);
-		/
+		
 		if (readData + readBytes > header.size)
 			readBytes = header.size - readData;
 
@@ -290,9 +297,6 @@ static int _truncate(const char *name, int size) {
 	}
 
 	if (startCluster == -1)
-		return 0;
-
-	if (offset > header.size)
 		return 0;
 
 	header.size = size;

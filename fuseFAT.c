@@ -1,3 +1,6 @@
+//for compil and run:
+//dd if=/dev/zero of=fuseFAT.file bs=1G count=1 && gcc -Wall fuseFAT.c `pkg-config fuse --cflags --libs` -o fuseFAT && ./fuseFAT ./mount fuseFAT.file
+
 #define FUSE_USE_VERSION  26
 
 #include <fuse.h>
@@ -62,10 +65,10 @@ int main(int argc, char *argv[])
 	}
 
 	fp = fopen(argv[2], "r+");
-	return fuse_main(argc, argv, &oper, NULL);//запуск фс
+	return fuse_main(2, argv, &oper, NULL);//запуск фс
 }
 
-static int fs_getattr(const char *path, struct stat *stbuf)
+static int _getattr(const char *path, struct stat *stbuf)
 {
 	int res = 0;
 
@@ -132,9 +135,9 @@ static int _open(const char *path, struct fuse_file_info * fi) {
 		fat_header header = getClusterHeader(cluster);
       	if (strcmp(path, header.filename) == 0)
       	{ 
-       		fileInfo->fileInode = header.firstCluster;
+       		/*fileInfo->fileInode = header.firstCluster;
           	fileInfo->fullfileName = header.filename;
-          	fileInfo->isLocked = false; // set is file locked
+          	fileInfo->isLocked = false; // set is file locked*/
 
             printf("open: Opened successfully\n");
         	return 0;
@@ -234,9 +237,6 @@ static int _truncate(const char *path, off_t size) {
 	if (startCluster == -1)
 		return 0;
 
-	if (offset > header.size)
-		return 0;
-
 	header.size = size;
 
   	int writtenBytes = 0;
@@ -325,7 +325,7 @@ static int _write(const char *path, const char *content, size_t size, off_t offs
 			continue;
 	
 		header = getClusterHeader(cluster);
-		if (strcmp(name, header.filename) == 0)
+		if (strcmp(path, header.filename) == 0)
 		{
 			startCluster = cluster;
 			break;
@@ -355,7 +355,7 @@ static int _write(const char *path, const char *content, size_t size, off_t offs
 
   		int indexOfData = MAX_POINTER * POINTER_SIZE + startCluster * CLUSTER_SIZE + sizeof(fat_header) + clusterOffset;
 		fseek(fp, indexOfData, SEEK_SET);
-		fwrite((char*)(buf + writtenBytes), readBytes, 1, fp);
+		fwrite((char*)(content + writtenBytes), readBytes, 1, fp);
 
 		writtenBytes += readBytes;
 		if (writtenBytes < size)
