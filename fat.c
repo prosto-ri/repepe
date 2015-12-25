@@ -29,7 +29,7 @@ static int _open(const char *name); //открыть файл
 static int _read(const char *name, char *buf, size_t size, off_t offset); //чтение файла
 static void _truncate(const char *name); //удаление файла
 static int _create(const char *name); //создание пустого файла
-static int _write(const char *name); //запись в файл
+static int _write(const char * name, const char * buf, size_t size, off_t offset); //запись в файл
 
 fat_header getClusterHeader(int cluster);//возвращает метаданные файла из кластера с индексом cluster
 int getClusterPointer(int index);//возвращает данные из указателя с индексом index
@@ -179,6 +179,93 @@ static int _read(const char *name, char *buf, size_t size, off_t offset)
 	return readData;
 }
 
+static int _write(const char * name, const char * buf, size_t size, off_t offset)
+{
+	int cluster;
+	int clusterPointer;
+	int startCluster = -1;
+
+	fat_header header;
+	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
+	{
+		clusterPointer = getClusterPointer(cluster);
+		if (clusterPointer == FREE_CLUSTER)
+			continue;
+	
+		header = getClusterHeader(cluster);
+		if (strcmp(name, header.filename) == 0)
+		{
+			startCluster = cluster;
+			break;
+		}
+	}
+
+	if (startCluster == -1)
+		return 0;
+
+	if (offset > header.size)
+		return 0;
+
+	startCluster = getClusterPointer(header.firstCluster);
+
+	int skipClusters = offset / (CLUSTER_SIZE - sizeof(fat_header));
+	int i;
+
+	for (i = 0; i < skipClusters; i++)
+		startCluster = getClusterPointer(startCluster);
+
+	int clusterOffset = offset % (CLUSTER_SIZE - sizeof(fat_header));
+
+  	int writtenBytes = 0;
+  	while (writtenBytes < size)
+  	{
+  		int readBytes = MIN(size, CLUSTER_SIZE - sizeof(fat_header) - clusterOffset);
+
+  		int indexOfData = MAX_POINTER * POINTER_SIZE + startCluster * CLUSTER_SIZE + sizeof(fat_header) + clusterOffset;
+		fseek(fp, indexOfData, SEEK_SET);
+		fwrite((char*)(buf + writtenBytes), readBytes, 1, fp);
+
+		writtenBytes += readBytes;
+		if (writtenBytes < size)
+		{
+			//нужен доп.кластер
+			if (startCluster == END_CLUSTER)
+			{
+				int freeCluster2 = getFreeCluster();
+				setClusterPointer(startCluster, freeCluster2);
+
+				int indexOfData = MAX_POINTER * POINTER_SIZE + freeCluster2 * CLUSTER_SIZE;
+
+				fseek(fp, indexOfData, SEEK_SET);
+				fwrite(&header, sizeof(fat_header), 1, fp);
+
+				startCluster = freeCluster2;
+			}
+			else
+				startCluster = getClusterPointer(startCluster);		
+
+			clusterOffset = 0;
+
+		}
+  	}  	
+
+  	//изменяем размер файла
+  	header.size += size;
+	startCluster = header.firstCluster;
+
+	while(1)
+	{
+		fseek(fp, MAX_POINTER * POINTER_SIZE + startCluster * CLUSTER_SIZE, SEEK_SET);
+		fwrite(&header, sizeof(fat_header), 1, fp);
+		if (getClusterPointer(startCluster) == END_CLUSTER)
+			break;
+
+		startCluster = getClusterPointer(startCluster);
+	}
+
+	return size;
+}
+
 static int _truncate(const char *name) {
     int cluster;
 	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
@@ -214,7 +301,7 @@ int getClusterPointer(int index)
 void setClusterPointer(int index, int data)
 {
 	fseek(fp, index, SEEK_SET);
-	fwrite(&data, sizeof(int32_t), 1, fp);
+	fwrite(&data, sizeof(int), 1, fp);
 }
 
 fat_header getClusterHeader(int cluster)
