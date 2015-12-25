@@ -60,27 +60,34 @@ int main(int argc, char *argv[])
 	return fuse_main(argc, argv, &oper, NULL);//запуск фс
 }
 
-static int _getattr(const char *path, struct stat * stbuf) {
-    printf("getattr: %s\n", path);
-    int res;
-
-	res = lstat(path, stbuf);
-	if (res == -1)
-		return -errno;
-
-	printf("getattr: %s\n", path);
+static int fs_getattr(const char *path, struct stat *stbuf)
+{
+	int res = 0;
 
 	memset(stbuf, 0, sizeof(struct stat));
 	if (strcmp(path, "/") == 0) {
 		stbuf->st_mode = S_IFDIR | 0755;
 		stbuf->st_nlink = 2;
-	} else {
-		stbuf->st_mode = S_IFREG | 0444;
-		stbuf->st_nlink = 1;
-		stbuf->st_size = 0;
+		return res;
 	}
 
-	return 0;
+	int cluster;
+	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
+	{
+		int index = getClusterPointer(cluster);
+		if (index == END_CLUSTER)
+		{
+			fat_header header = getClusterHeader(cluster);
+
+			stbuf->st_mode = S_IFREG | 0444;
+			stbuf->st_nlink = 1;
+			stbuf->st_size = header.size;
+
+			return 0;
+		}
+	}
+
+	return -ENOENT;
 }
 
 static int _readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info * fi) {
@@ -108,11 +115,13 @@ static int _open(const char *path, struct fuse_file_info * fi) {
 
     int cluster;
     for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
-    {
-    	int clusterPointer = getClusterPointer(cluster);
-    	if (clusterPointer == END_CLUSTER)
-    	{
-      		fat_header header = getClusterHeader(cluster);
+	{
+		int clusterPointer = getClusterPointer(cluster);
+
+		if (clusterPointer == FREE_CLUSTER)
+			continue;
+
+		fat_header header = getClusterHeader(cluster);
       		if (strcmp(path, header.filename) == 0)
       		{ 
         		fileInfo->fileInode = header.firstCluster;
@@ -124,20 +133,74 @@ static int _open(const char *path, struct fuse_file_info * fi) {
         	}
         } 
     }
-  }
+  
   return -ENOENT; //если файла с данным именем не сущ-ет
 }
 
 static int _read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info * fi) {
     printf("read: %s\n", path);
-    /*
-      Read file
-      ...
-    */
-    byte *fileContent = readFile(fileInode);
-    memcpy(buf, fileContent, size);
-      
-    return size;
+    
+    int cluster;
+	int clusterPointer;
+	int startCluster = -1;
+
+	fat_header header;
+	for (cluster = 0; cluster < MAX_POINTER * POINTER_SIZE; cluster+= POINTER_SIZE)
+	{
+		clusterPointer = getClusterPointer(cluster);
+		if (clusterPointer == FREE_CLUSTER)
+			continue;
+	
+		header = getClusterHeader(cluster);
+		if (strcmp(path, header.filename) == 0 && startCluster == -1)
+		{
+			startCluster = cluster;
+			break;
+		}
+	}
+
+	if (startCluster == -1)
+		return 0;
+
+	if (offset > header.size)
+		return 0;
+
+	startCluster = getClusterPointer(header.firstCluster);
+
+	int skipClusters = offset / (CLUSTER_SIZE - sizeof(fat_header));//кол-во кластеров, которые нужно пропустить, чтобы найти нужную инфу
+	int i;
+
+	for (i = 0; i < skipClusters; i++)
+		startCluster = getClusterPointer(startCluster);
+
+	int clusterOffset = offset % (CLUSTER_SIZE - sizeof(fat_header));//смещение внутри данного кластера
+
+	int readData = 0;
+	while(readData < size)
+	{		
+		int readBytes = MIN(size - readData, CLUSTER_SIZE - sizeof(fat_header) - clusterOffset);
+		/
+		if (readData + readBytes > header.size)
+			readBytes = header.size - readData;
+
+		//индекс нужной инфы в файле
+	  	int indexOfData = MAX_POINTER * POINTER_SIZE + startCluster * CLUSTER_SIZE + sizeof(fat_header) + clusterOffset;
+
+		fseek(fp, indexOfData, SEEK_SET);
+		fread(buf + readData, readBytes, 1, fp);//считывание с определенного индекса
+
+		readData += readBytes;
+		if (readData < size)
+		{
+			startCluster = getClusterPointer(startCluster);
+			clusterOffset = 0;
+
+			if (startCluster == END_CLUSTER)
+				break;
+		}
+	}
+
+	return readData;
 }
 
 static int _truncate(const char *path, off_t size) {
@@ -160,7 +223,7 @@ static int _create(const char *path, mode_t mode, struct fuse_file_info *fi) {
 		if (clusterPointer == END_CLUSTER)
 		{			
 			fat_header header = getClusterHeader(cluster);
-			if (strcmp(name, header.filename) == 0)
+			if (strcmp(path, header.filename) == 0)
 				return -1;
 		}
 	}
@@ -171,7 +234,7 @@ static int _create(const char *path, mode_t mode, struct fuse_file_info *fi) {
 
 	fat_header header;
 
-	strcpy(header.filename, name);
+	strcpy(header.filename, path);
 	header.size = 0;
 	header.firstCluster = freeCluster;
 
