@@ -1,7 +1,7 @@
 //for compil and run:
 //dd if=/dev/zero of=fuseFAT.file bs=1G count=1 && gcc -Wall fuseFAT.c `pkg-config fuse --cflags --libs` -o fuseFAT && ./fuseFAT ./mount fuseFAT.file
 
-//dd if=/dev/zero of=fuseFAT.file bs=1G count=1 && gcc -Wall fuseFAT.c `pkg-config fuse --cflags --libs` -o fuseFAT && ./fuseFAT ./mount -d -f -s
+//dd if=/dev/zero of=fuseFAT.file bs=1G count=1 && gcc -Wall fuseFAT.c `pkg-config fuse --cflags --libs` -o fuseFAT && ./fuseFAT ./mount -f -s
 
 #define FUSE_USE_VERSION  26
 
@@ -54,6 +54,7 @@ static struct fuse_operations oper = {
     .write = _write,
     .getattr = _getattr,
     .mkdir 	= _mkdir,
+    //.init = _init,
     .truncate = _truncate
 };
 
@@ -62,7 +63,7 @@ int getClusterPointer(int index);//возвращает данные из ука
 void setClusterPointer(int index, int data);//установка нового значения указателя с индексом index
 int getFreeCluster();//возвращает индекс первого пустого указателя или -1
 int getNeededFolderPointer(const char* foldername);//возвращает адрес нужной папки
-int getFirstCluster(fat_header header);
+//int getFirstCluster(fat_header header);
 void setFirstCluster(fat_header* header, int index);
 
 int fileExists(char* filename, int folderPointer); //проверка существования файла
@@ -70,7 +71,7 @@ int folderExists(char* filename, int folderPointer); //проверка сущ-�
 
 fat_header* getFileHeader(char* filename, int folderPointer);//возвращает метаданные файла
 void setFileHeader(char* filename, int folderPointer, fat_header* header);//записывает метаданные файла
-void _init(); //создание корневой папки
+void fat_init(); //создание корневой папки
 
 int main(int argc, char *argv[])
 {
@@ -84,12 +85,12 @@ int main(int argc, char *argv[])
 
 	// если нет корневой папки, то создаем ее
 	if (getClusterPointer(0) == FREE_CLUSTER)
-		_init();
+		fat_init();
 
 	return fuse_main(argc, argv, &oper, NULL);
 }
 
-void _init()
+void fat_init()
 {
 	setClusterPointer(0, END_CLUSTER);
 	fseek(fp, MAX_POINTER * POINTER_SIZE, SEEK_SET);
